@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var dd, _ = NewDeviceDetector("regexes", false)
+var dd, _ = NewDeviceDetector("regexes", &CacheParams{false, 0})
 
 func TestParseInvalidUA(t *testing.T) {
 	info := dd.Parse(`12345`)

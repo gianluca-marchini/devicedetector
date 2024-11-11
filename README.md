@@ -33,8 +33,8 @@ import (
 )
 
 func main() {
-	// The function takes 2 parameters: the path to the folder containing the regexes, and if the cache can be enabled
-	dd, err := NewDeviceDetector("regexes", false)
+	// The function takes 2 parameters: the path to the folder containing the regexes, and the parameters for the cache (isEnabled: bool, size: int)
+	dd, err := NewDeviceDetector("regexes", &CacheParams{true, 100})
 	if err != nil {
 		log.Fatal(err)
 	}
