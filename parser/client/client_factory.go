@@ -30,7 +30,7 @@ func NewClientParsers(dir string, names []string) []ClientParser {
 			r[i] = f(dir)
 		}
 		if r[i] == nil {
-			fmt.Printf("Client is null:" + name)
+			fmt.Printf("Client is null: %s", name)
 		}
 
 	}

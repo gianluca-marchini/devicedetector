@@ -50,10 +50,15 @@ type DeviceDetector struct {
 	SkipBotDetection      bool
 }
 
+type CacheParams struct {
+	isEnabled bool
+	size      int
+}
+
 // Initialize the device detector.
 // - dir: path of the folder containing the regexes to parse the userAgent
 // - enableCache: if true, the cache will be enabled.
-func NewDeviceDetector(dir string, enableCache bool) (*DeviceDetector, error) {
+func NewDeviceDetector(dir string, cacheParams *CacheParams) (*DeviceDetector, error) {
 	vp, err := parser.NewVendor(filepath.Join(dir, parser.FixtureFileVendor))
 	if err != nil {
 		return nil, err
@@ -70,8 +75,12 @@ func NewDeviceDetector(dir string, enableCache bool) (*DeviceDetector, error) {
 		osParsers:    []parser.OsParser{osp},
 	}
 
-	if enableCache {
-		d.cache = NewCache()
+	if cacheParams.isEnabled {
+		if cacheParams.size == 0 {
+			cacheParams.size = CACHE_DEFAULT_SIZE
+		}
+
+		d.cache = NewCache(cacheParams.size)
 	}
 
 	clientDir := filepath.Join(dir, "client")
