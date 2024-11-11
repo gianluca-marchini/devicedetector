@@ -51,8 +51,8 @@ type DeviceDetector struct {
 }
 
 type CacheParams struct {
-	isEnabled bool
-	size      int
+	IsEnabled bool
+	Size      int
 }
 
 // Initialize the device detector.
@@ -75,12 +75,12 @@ func NewDeviceDetector(dir string, cacheParams *CacheParams) (*DeviceDetector, e
 		osParsers:    []parser.OsParser{osp},
 	}
 
-	if cacheParams.isEnabled {
-		if cacheParams.size == 0 {
-			cacheParams.size = CACHE_DEFAULT_SIZE
+	if cacheParams.IsEnabled {
+		if cacheParams.Size == 0 {
+			cacheParams.Size = CACHE_DEFAULT_SIZE
 		}
 
-		d.cache = NewCache(cacheParams.size)
+		d.cache = NewCache(cacheParams.Size)
 	}
 
 	clientDir := filepath.Join(dir, "client")
