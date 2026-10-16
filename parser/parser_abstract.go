@@ -76,37 +76,61 @@ type MatchResult interface {
 type Regular struct {
 	Regex  string `yaml:"regex" json:"regex"`
 	Regexp *regexp.Regexp
+	x      *Regex
 }
 
+// UserAgentPattern returns the pattern actually compiled for a user agent
+// regex of the YAML files: like Matomo, it only matches at the start of the
+// user agent or after a separator.
+func UserAgentPattern(regex string) string {
+	// $regex = '/(?:^|[^A-Z_-])(?:' . str_replace('/', '\/', $regex) . ')/i';
+	rg := strings.Replace(regex, `/`, `\/`, -1)
+	rg = strings.Replace(rg, `++`, `+`, -1)
+	rg = strings.Replace(rg, `\_`, `_`, -1)
+	return `(?:^|[^A-Z0-9-_]|[^A-Z0-9-]_|sprd-)(?:` + rg + ")"
+}
+
+// Compile compiles the regex if needed and returns it.
+//
+// All the regexes loaded by this package are compiled at load time. A
+// Regular built in other ways must be compiled before being used by more
+// goroutines.
 func (r *Regular) Compile() *regexp.Regexp {
 	if r.Regexp == nil {
-		// $regex = '/(?:^|[^A-Z_-])(?:' . str_replace('/', '\/', $regex) . ')/i';
-		//str := `(?i)(?:^|[^A-Z0-9-_]|[^A-Z0-9-]_|sprd-)(?:` + r.Regex + ")"
-		rg := r.Regex
-		rg = strings.Replace(rg, `/`, `\/`, -1)
-		rg = strings.Replace(rg, `++`, `+`, -1)
-		rg = strings.Replace(rg, `\_`, `_`, -1)
-		str := `(?:^|[^A-Z0-9-_]|[^A-Z0-9-]_|sprd-)(?:` + rg + ")"
-		r.Regexp = regexp.MustCompile(str, regexp.IgnoreCase)
+		r.Regexp = regexp.MustCompile(UserAgentPattern(r.Regex), regexp.IgnoreCase)
+		r.x = newUserAgentRegex(r.Regexp, r.Regex)
 	}
 	return r.Regexp
 }
 
-func (r *Regular) IsMatchUserAgent(ua string) bool {
-	m, _ := r.Compile().MatchString(ua)
+// IsMatchUA reports whether the regex matches the prepared user agent.
+func (r *Regular) IsMatchUA(ua *UserAgent) bool {
+	re := r.Compile()
+	if r.x != nil {
+		return r.x.IsMatch(ua)
+	}
+	// Regexp set by the caller.
+	m, _ := re.MatchRunes(ua.getRunes())
 	return m
 }
 
-func (r *Regular) MatchUserAgent(ua string) []string {
-	//return r.Compile().FindStringSubmatch(ua)
-	if match, err := r.Compile().FindStringMatch(ua); err == nil && match != nil {
-		matches := make([]string, match.GroupCount())
-		for i, g := range match.Groups() {
-			matches[i] = g.String()
-		}
-		return matches
+// MatchUA returns the match and the groups of the regex in the prepared
+// user agent, nil when it does not match.
+func (r *Regular) MatchUA(ua *UserAgent) []string {
+	re := r.Compile()
+	if r.x != nil {
+		return r.x.Match(ua)
 	}
-	return nil
+	// Regexp set by the caller.
+	return matchRegexp2(re, ua.getRunes())
+}
+
+func (r *Regular) IsMatchUserAgent(ua string) bool {
+	return r.IsMatchUA(NewUserAgent(ua))
+}
+
+func (r *Regular) MatchUserAgent(ua string) []string {
+	return r.MatchUA(NewUserAgent(ua))
 }
 
 func MatchUserAgent(ua, regex string) []string {
@@ -149,10 +173,26 @@ var (
 	tdReg = regexp.MustCompile(` TD$`, regexp.IgnoreCase)
 )
 
+// removeTD removes a final " TD" (case insensitive), like replacing tdReg
+// with "": in regexp2 `$` also matches before a final "\n".
+func removeTD(model string) string {
+	isTD := func(s string) bool {
+		return s[0] == ' ' && s[1]|0x20 == 't' && s[2]|0x20 == 'd'
+	}
+	n := len(model)
+	if n >= 3 && isTD(model[n-3:]) {
+		return model[:n-3]
+	}
+	if n >= 4 && model[n-1] == '\n' && isTD(model[n-4:n-1]) {
+		return model[:n-4] + "\n"
+	}
+	return model
+}
+
 func BuildModel(m string, matches []string) string {
 	model := BuildByMatch(m, matches)
 	model = strings.ReplaceAll(model, "_", " ")
-	model, _ = tdReg.Replace(model, "", 0, -1)
+	model = removeTD(model)
 	if model == "Build" {
 		return ""
 	}

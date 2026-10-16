@@ -2,6 +2,7 @@ package parser
 
 import (
 	"strings"
+	"sync"
 )
 
 const ParserNameOs = "os"
@@ -150,10 +151,37 @@ type OsParser interface {
 	Parse(string) *OsMatchResult
 }
 
+// operatingSystemsByName maps the lower-cased (ASCII) names of
+// OperatingSystems to their short codes.
+var operatingSystemsByName = func() map[string]string {
+	m := make(map[string]string, len(OperatingSystems))
+	for short, name := range OperatingSystems {
+		m[asciiLower(name)] = short
+	}
+	return m
+}()
+
+func asciiLower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if 'A' <= s[i] && s[i] <= 'Z' {
+			b := []byte(s)
+			for j := i; j < len(b); j++ {
+				if 'A' <= b[j] && b[j] <= 'Z' {
+					b[j] += 'a' - 'A'
+				}
+			}
+			return string(b)
+		}
+	}
+	return s
+}
+
 // Parses the useragent for operating system information
 type Oss struct {
 	Regexes      []*OsReg
+	index        *Index
 	platforms    []*PlatformReg
+	overAllOnce  sync.Once
 	overAllMatch Regular
 }
 
@@ -171,45 +199,64 @@ func NewOss(file string) (*Oss, error) {
 	for _, pp := range ps {
 		pp.Compile()
 	}
+	// Compile now: compiling on first use is not safe for concurrent use.
+	for _, item := range v {
+		item.Compile()
+	}
+	regs := make([]*Regular, len(v))
+	for i, item := range v {
+		regs[i] = &item.Regular
+	}
 	return &Oss{
 		Regexes:   v,
+		index:     NewIndex(regs),
 		platforms: ps,
 	}, nil
 }
 
 func (o *Oss) ParsePlatform(ua string) string {
+	return o.parsePlatform(NewUserAgent(ua))
+}
+
+func (o *Oss) parsePlatform(ua *UserAgent) string {
 	for _, p := range o.platforms {
-		if p.IsMatchUserAgent(ua) {
+		if p.IsMatchUA(ua) {
 			return p.Name
 		}
 	}
 	return PlatformTypeNONE
 }
 
+func (o *Oss) buildOverAllMatch() {
+	buildOverAllMatch(&o.overAllMatch, len(o.Regexes), func(i int) string { return o.Regexes[i].Regex })
+}
+
 func (o *Oss) PreMatch(ua string) bool {
+	o.overAllOnce.Do(o.buildOverAllMatch)
 	if o.overAllMatch.Regexp == nil {
-		count := len(o.Regexes)
-		if count == 0 {
-			return false
-		}
-		sb := strings.Builder{}
-		sb.WriteString(o.Regexes[count-1].Regex)
-		for i := count - 2; i >= 0; i-- {
-			sb.WriteString("|")
-			sb.WriteString(o.Regexes[i].Regex)
-		}
-		o.overAllMatch.Regex = sb.String()
-		o.overAllMatch.Compile()
+		return false
 	}
-	r := o.overAllMatch.IsMatchUserAgent(ua)
-	return r
+	return o.overAllMatch.IsMatchUserAgent(ua)
 }
 
 func (o *Oss) Parse(ua string) *OsMatchResult {
+	return o.ParseUserAgent(NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (o *Oss) ParseUserAgent(u *UserAgent) *OsMatchResult {
 	var matches []string
 	var osRegex *OsReg
-	for _, osRegex = range o.Regexes {
-		matches = osRegex.MatchUserAgent(ua)
+	var candidates Candidates
+	if o.index != nil {
+		candidates = o.index.Candidates(u)
+	}
+	for i := range o.Regexes {
+		osRegex = o.Regexes[i]
+		if candidates != nil && !candidates.Has(i) {
+			continue
+		}
+		matches = osRegex.MatchUA(u)
 		if len(matches) > 0 {
 			break
 		}
@@ -221,20 +268,16 @@ func (o *Oss) Parse(ua string) *OsMatchResult {
 
 	name := BuildByMatch(osRegex.Name, matches)
 	short := UnknownShort
-
-	for osShort, osName := range OperatingSystems {
-		if StringEqualIgnoreCase(name, osName) {
-			name = osName
-			short = osShort
-			break
-		}
+	if osShort, ok := operatingSystemsByName[asciiLower(name)]; ok {
+		name = OperatingSystems[osShort]
+		short = osShort
 	}
 
 	result := &OsMatchResult{
 		Name:      name,
 		ShortName: short,
 		Version:   BuildVersion(osRegex.Version, matches),
-		Platform:  o.ParsePlatform(ua),
+		Platform:  o.parsePlatform(u),
 	}
 	return result
 }

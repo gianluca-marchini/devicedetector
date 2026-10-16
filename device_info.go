@@ -1,17 +1,19 @@
 package devicedetector
 
 import (
-	regexp "github.com/dlclark/regexp2"
-
 	"github.com/gianluca-marchini/devicedetector/parser"
 	"github.com/gianluca-marchini/devicedetector/parser/client"
 	"github.com/gianluca-marchini/devicedetector/parser/device"
 )
 
 var (
-	touchReg  = regexp.MustCompile(fixUserAgentRegEx(`Touch`), regexp.IgnoreCase)
-	adrTabReg = regexp.MustCompile(fixUserAgentRegEx(`Android( [\.0-9]+)?; Tablet;`), regexp.IgnoreCase)
-	adrMobReg = regexp.MustCompile(fixUserAgentRegEx(`Android( [\.0-9]+)?; Mobile;`), regexp.IgnoreCase)
+	touchRegex  = parser.NewRegex(fixUserAgentRegEx(`Touch`))
+	adrTabRegex = parser.NewRegex(fixUserAgentRegEx(`Android( [\.0-9]+)?; Tablet;`))
+	adrMobRegex = parser.NewRegex(fixUserAgentRegEx(`Android( [\.0-9]+)?; Mobile;`))
+
+	touchReg  = touchRegex.Regexp()
+	adrTabReg = adrTabRegex.Regexp()
+	adrMobReg = adrMobRegex.Regexp()
 )
 
 type DeviceInfo struct {
@@ -31,18 +33,15 @@ func (d *DeviceInfo) IsBot() bool {
 }
 
 func (d *DeviceInfo) IsTouchEnabled() bool {
-	find, _ := touchReg.MatchString(d.userAgent)
-	return find
+	return touchRegex.IsMatch(parser.NewUserAgent(d.userAgent))
 }
 
 func (d *DeviceInfo) HasAndroidTableFragment() bool {
-	find, _ := adrTabReg.MatchString(d.userAgent)
-	return find
+	return adrTabRegex.IsMatch(parser.NewUserAgent(d.userAgent))
 }
 
 func (d *DeviceInfo) HasAndroidMobileFragment() bool {
-	find, _ := adrMobReg.MatchString(d.userAgent)
-	return find
+	return adrMobRegex.IsMatch(parser.NewUserAgent(d.userAgent))
 }
 
 func (d *DeviceInfo) UsesMobileBrowser() bool {

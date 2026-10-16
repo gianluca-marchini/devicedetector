@@ -2,6 +2,8 @@ package device
 
 import (
 	"path/filepath"
+
+	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
 const ParserNameConsole = `console`
@@ -28,8 +30,13 @@ type Console struct {
 }
 
 func (c *Console) Parse(ua string) *DeviceMatchResult {
-	if !c.PreMatch(ua) {
+	return c.ParseUserAgent(parser.NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (c *Console) ParseUserAgent(u *parser.UserAgent) *DeviceMatchResult {
+	if !c.gate(u) {
 		return nil
 	}
-	return c.DeviceParserAbstract.Parse(ua)
+	return c.parse(u)
 }

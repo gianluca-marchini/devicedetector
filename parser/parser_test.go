@@ -25,3 +25,17 @@ func TestReg(t *testing.T) {
 	require.Equal(t, " Chrome/34.0.1847.114", matches[0])
 	require.Equal(t, "34.0.1847.114", matches[1])
 }
+
+func TestRemoveTD(t *testing.T) {
+	inputs := []string{"", "TD", " TD", " td", " Td", "x TD", "x tD", "x TD TD", "TD x", "x TD\n", "x TD\n\n",
+		"x  TD", "xTD", " T D", "x TDD", "\n TD", " TD\n", "Galaxy TD", "Ä TD", " ŦD", "x TＤ"}
+	for _, in := range inputs {
+		want, err := tdReg.Replace(in, "", 0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := removeTD(in); got != want {
+			t.Errorf("removeTD(%q) = %q, regexp2 gives %q", in, got, want)
+		}
+	}
+}

@@ -1,6 +1,12 @@
 package parser
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/gianluca-marchini/devicedetector/internal/alternation"
+	"sync"
+	"sync/atomic"
+)
 
 type Producer struct {
 	Name string `yaml:"name" json:"name"`
@@ -37,12 +43,17 @@ type BotParser interface {
 type BotParserAbstract struct {
 	Regexes        []*BotReg
 	ParserName     string
-	discardDetails bool
+	discardDetails atomic.Bool
+	overAllOnce    sync.Once
 	overAllMatch   Regular
+	// union is true when overAllMatch matches exactly when one of the
+	// regexes matches: it is then evaluated one regex at a time.
+	union bool
+	index *Index
 }
 
 func (b *BotParserAbstract) DiscardDetails(v bool) {
-	b.discardDetails = v
+	b.discardDetails.Store(v)
 }
 
 func (b *BotParserAbstract) Load(file string) error {
@@ -55,38 +66,84 @@ func (b *BotParserAbstract) Load(file string) error {
 		item.Compile()
 	}
 	b.Regexes = v
+	b.overAllMatch = Regular{}
+	b.buildOverAllMatch()
+	b.overAllOnce.Do(func() {})
 	return nil
 }
 
-func (b *BotParserAbstract) PreMatch(ua string) bool {
-	if b.overAllMatch.Regexp == nil {
-		count := len(b.Regexes)
-		if count == 0 {
-			return false
-		}
-		sb := strings.Builder{}
-		sb.WriteString(b.Regexes[count-1].Regex)
-		for i := count - 2; i >= 0; i-- {
-			sb.WriteString("|")
-			sb.WriteString(b.Regexes[i].Regex)
-		}
-		b.overAllMatch.Regex = sb.String()
-		b.overAllMatch.Compile()
+// buildOverAllMatch compiles into r the alternation of the count regexes
+// returned by regex, in reverse order. It does nothing when count is 0.
+func buildOverAllMatch(r *Regular, count int, regex func(int) string) {
+	if count == 0 {
+		return
 	}
-	r := b.overAllMatch.IsMatchUserAgent(ua)
-	return r
+	sb := strings.Builder{}
+	sb.WriteString(regex(count - 1))
+	for i := count - 2; i >= 0; i-- {
+		sb.WriteString("|")
+		sb.WriteString(regex(i))
+	}
+	r.Regex = sb.String()
+	r.Compile()
+}
+
+func (b *BotParserAbstract) PreMatch(ua string) bool {
+	return b.preMatch(NewUserAgent(ua))
+}
+
+func (b *BotParserAbstract) buildOverAllMatch() {
+	regexes := make([]string, len(b.Regexes))
+	regs := make([]*Regular, len(b.Regexes))
+	for i, r := range b.Regexes {
+		r.Compile()
+		regexes[i] = r.Regex
+		regs[i] = &r.Regular
+	}
+	b.index = NewIndex(regs)
+	if b.union = alternation.IsUnion(regexes); b.union {
+		return
+	}
+	buildOverAllMatch(&b.overAllMatch, len(b.Regexes), func(i int) string { return b.Regexes[i].Regex })
+}
+
+func (b *BotParserAbstract) preMatch(ua *UserAgent) bool {
+	b.overAllOnce.Do(b.buildOverAllMatch)
+	if b.union {
+		candidates := b.index.Candidates(ua)
+		for i, regex := range b.Regexes {
+			if candidates.Has(i) && regex.IsMatchUA(ua) {
+				return true
+			}
+		}
+		return false
+	}
+	if b.overAllMatch.Regexp == nil {
+		return false
+	}
+	return b.overAllMatch.IsMatchUA(ua)
 }
 
 var EmptyBotMatchResult = new(BotMatchResult)
 
 // Parses the current UA and checks whether it contains bot information
 func (b *BotParserAbstract) Parse(ua string) *BotMatchResult {
-	if b.PreMatch(ua) {
-		if b.discardDetails {
+	u := NewUserAgent(ua)
+	if b.discardDetails.Load() {
+		if b.preMatch(u) {
 			return EmptyBotMatchResult
 		}
-		for _, regex := range b.Regexes {
-			matches := regex.MatchUserAgent(ua)
+		return nil
+	}
+	b.overAllOnce.Do(b.buildOverAllMatch)
+	// With union, the loop finds a match exactly when preMatch is true.
+	if b.union || b.preMatch(u) {
+		candidates := b.index.Candidates(u)
+		for i, regex := range b.Regexes {
+			if !candidates.Has(i) {
+				continue
+			}
+			matches := regex.MatchUA(u)
 			if len(matches) > 0 {
 				return &regex.BotMatchResult
 			}
