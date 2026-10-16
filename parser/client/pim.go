@@ -2,6 +2,8 @@ package client
 
 import (
 	"path/filepath"
+
+	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
 const ParserNamePim = `pim`
@@ -26,4 +28,9 @@ func NewPim(fileName string) *Pim {
 // Client parser for pim (personal information manager) detection
 type Pim struct {
 	ClientParserAbstract
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (p *Pim) ParseUserAgent(ua *parser.UserAgent) *ClientMatchResult {
+	return p.parse(ua)
 }

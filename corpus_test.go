@@ -44,16 +44,17 @@ type corpusFixture struct {
 	File      string `yaml:"-"`
 }
 
-// fixtureField returns the value of key in a fixture section, "" when absent.
-func fixtureField(section any, key string) string {
-	m, ok := section.(map[any]any)
-	if !ok {
-		return ""
+// fixtureField returns the value of a key ("a.b" for nested keys) in a
+// fixture section, nil when absent.
+func fixtureField(section any, key string) any {
+	for _, k := range strings.Split(key, ".") {
+		m, ok := section.(map[any]any)
+		if !ok {
+			return nil
+		}
+		section = m[k]
 	}
-	if v, ok := m[key]; ok && v != nil {
-		return fmt.Sprint(v)
-	}
-	return ""
+	return section
 }
 
 var (

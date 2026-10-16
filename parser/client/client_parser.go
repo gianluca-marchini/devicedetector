@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gianluca-marchini/devicedetector/internal/alternation"
 	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
@@ -35,6 +36,10 @@ type ClientParserAbstract struct {
 	ParserName   string
 	overAllOnce  sync.Once
 	overAllMatch parser.Regular
+	// union is true when overAllMatch matches exactly when one of the
+	// regexes matches: it is then evaluated one regex at a time.
+	union bool
+	index *parser.Index
 }
 
 func (c *ClientParserAbstract) Load(file string) error {
@@ -59,6 +64,17 @@ func (c *ClientParserAbstract) buildOverAllMatch() {
 	if count == 0 {
 		return
 	}
+	regexes := make([]string, count)
+	regs := make([]*parser.Regular, count)
+	for i, r := range c.Regexes {
+		r.Compile()
+		regexes[i] = r.Regex
+		regs[i] = &r.Regular
+	}
+	c.index = parser.NewIndex(regs)
+	if c.union = alternation.IsUnion(regexes); c.union {
+		return
+	}
 	sb := strings.Builder{}
 	sb.WriteString(c.Regexes[count-1].Regex)
 	for i := count - 2; i >= 0; i-- {
@@ -75,6 +91,15 @@ func (c *ClientParserAbstract) PreMatch(ua string) bool {
 
 func (c *ClientParserAbstract) preMatch(ua *parser.UserAgent) bool {
 	c.overAllOnce.Do(c.buildOverAllMatch)
+	if c.union {
+		candidates := c.index.Candidates(ua)
+		for i, regex := range c.Regexes {
+			if candidates.Has(i) && regex.IsMatchUA(ua) {
+				return true
+			}
+		}
+		return false
+	}
 	if c.overAllMatch.Regexp == nil {
 		return false
 	}
@@ -83,9 +108,21 @@ func (c *ClientParserAbstract) preMatch(ua *parser.UserAgent) bool {
 
 // Parses the current UA and checks whether it contains any client information
 func (c *ClientParserAbstract) Parse(ua string) *ClientMatchResult {
-	u := parser.NewUserAgent(ua)
-	if c.preMatch(u) {
-		for _, regex := range c.Regexes {
+	return c.parse(parser.NewUserAgent(ua))
+}
+
+func (c *ClientParserAbstract) parse(u *parser.UserAgent) *ClientMatchResult {
+	c.overAllOnce.Do(c.buildOverAllMatch)
+	// With union, the loop finds a match exactly when preMatch is true.
+	if c.union || c.preMatch(u) {
+		var candidates parser.Candidates
+		if c.index != nil {
+			candidates = c.index.Candidates(u)
+		}
+		for i, regex := range c.Regexes {
+			if candidates != nil && !candidates.Has(i) {
+				continue
+			}
 			matches := regex.MatchUA(u)
 			if len(matches) > 0 {
 				return &ClientMatchResult{

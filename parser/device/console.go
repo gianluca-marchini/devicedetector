@@ -30,8 +30,12 @@ type Console struct {
 }
 
 func (c *Console) Parse(ua string) *DeviceMatchResult {
-	u := parser.NewUserAgent(ua)
-	if !c.preMatch(u) {
+	return c.ParseUserAgent(parser.NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (c *Console) ParseUserAgent(u *parser.UserAgent) *DeviceMatchResult {
+	if !c.gate(u) {
 		return nil
 	}
 	return c.parse(u)

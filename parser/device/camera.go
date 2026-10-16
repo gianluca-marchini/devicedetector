@@ -30,8 +30,12 @@ type Camera struct {
 }
 
 func (c *Camera) Parse(ua string) *DeviceMatchResult {
-	u := parser.NewUserAgent(ua)
-	if !c.preMatch(u) {
+	return c.ParseUserAgent(parser.NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (c *Camera) ParseUserAgent(u *parser.UserAgent) *DeviceMatchResult {
+	if !c.gate(u) {
 		return nil
 	}
 	return c.parse(u)

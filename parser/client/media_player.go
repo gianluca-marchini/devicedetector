@@ -2,6 +2,8 @@ package client
 
 import (
 	"path/filepath"
+
+	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
 const ParserNameMediaPlayer = `mediaplayer`
@@ -26,4 +28,9 @@ func NewMediaPlayer(fileName string) *MediaPlayer {
 // Client parser for mediaplayer detection
 type MediaPlayer struct {
 	ClientParserAbstract
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (m *MediaPlayer) ParseUserAgent(ua *parser.UserAgent) *ClientMatchResult {
+	return m.parse(ua)
 }

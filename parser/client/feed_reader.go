@@ -2,6 +2,8 @@ package client
 
 import (
 	"path/filepath"
+
+	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
 const ParserNameFeedReader = `feed reader`
@@ -26,6 +28,11 @@ func NewFeedReader(fileName string) *FeedReader {
 // Client parser for feed reader detection
 type FeedReader struct {
 	ClientParserAbstract
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (f *FeedReader) ParseUserAgent(ua *parser.UserAgent) *ClientMatchResult {
+	return f.parse(ua)
 }
 
 //type FeedReader struct {

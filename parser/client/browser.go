@@ -433,6 +433,7 @@ type BrowserItem struct {
 // Client parser for browser detection
 type Browser struct {
 	Regexes []*BrowserItem
+	index   *parser.Index
 	engine  BrowserEngine
 	// verCache holds the engine version regexes. It is only written by Load.
 	verCache map[string]*Version
@@ -490,6 +491,11 @@ func (b *Browser) Load(file string) error {
 			}
 		}
 	}
+	regs := make([]*parser.Regular, len(v))
+	for i, item := range v {
+		regs[i] = &item.Regular
+	}
+	b.index = parser.NewIndex(regs)
 	b.verCache = verCache
 	b.Regexes = v
 	return nil
@@ -500,8 +506,20 @@ func (b *Browser) PreMatch(ua string) bool {
 }
 
 func (b *Browser) Parse(ua string) *BrowserMatchResult {
-	u := parser.NewUserAgent(ua)
-	for _, regex := range b.Regexes {
+	return b.ParseUserAgent(parser.NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (b *Browser) ParseUserAgent(u *parser.UserAgent) *BrowserMatchResult {
+	ua := u.String()
+	var candidates parser.Candidates
+	if b.index != nil {
+		candidates = b.index.Candidates(u)
+	}
+	for i, regex := range b.Regexes {
+		if candidates != nil && !candidates.Has(i) {
+			continue
+		}
 		matches := regex.MatchUA(u)
 		if len(matches) > 0 {
 			name := parser.BuildByMatch(regex.Name, matches)

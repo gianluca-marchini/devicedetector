@@ -9,6 +9,11 @@ This is a port of the popular PHP [device-detector](https://github.com/matomo-or
 ### New features
 The following features have been introduced:
 1. cache: if enabled, the application will manage the results with an internal cache to avoid heavy regex operations if the userAgent has been already processed.
+2. performance: an uncached `Parse` takes tens of microseconds instead of milliseconds. Regexes are skipped with literal prefilters and per-list indexes, and executed with the standard library engine (RE2) when it is equivalent to regexp2. The results are exactly the ones of regexp2: see [CHANGELOG.md](CHANGELOG.md).
+3. concurrency: a `DeviceDetector` can be shared by many goroutines (`Parse` is safe for concurrent use; do not change `DiscardBotInformation` / `SkipBotDetection` while parsing).
+4. determinism: the entries of the YAML files are applied in the order of the files, like Matomo does.
+
+Requires Go 1.27.
 
 Installation
 ------------
@@ -72,23 +77,22 @@ func main() {
 
 ## Tests
 
-go test
+```
+go test ./...
+go test -race ./...
+```
 
-### Running tests
+- `TestFixtures` checks every fixture (os, client, device, bot).
+- `TestSnapshotEquivalence` compares the complete output for every user agent of the corpus (fixtures plus `testdata/extra_user_agents.txt`) with `testdata/snapshot.json.gz`. After an intended change of the output, regenerate it with `DD_SNAPSHOT_WRITE=testdata/snapshot.json.gz go test -run TestSnapshotWrite .`
+- `TestRegexFastPathsEquivalence` (package `parser`) compares the fast paths with plain regexp2 for every regex of the YAML files; `DD_EXHAUSTIVE=1` uses the whole corpus (several minutes).
+
+### Benchmarks
 
 ```
-cd devicedetector
-go test
-
-cd devicedetector/parser
-go test
-
-cd devicedetector/parser/client
-go test
-
-cd devicedetector/parser/device
-go test
+go test -run XXX -bench 'BenchmarkParse$|BenchmarkParseParallel$' -benchtime=20000x .
 ```
+
+`BenchmarkParse` measures one uncached parse per op (`b.Loop`), `BenchmarkParseParallel` shares one detector between GOMAXPROCS goroutines (`RunParallel`) and also reports the latency of a single parse (`ns/parse`).
 
 ## Device Detector for other languages
 

@@ -19,9 +19,12 @@ func init() {
 func NewHbbTv(fileName string) *HbbTv {
 	h := &HbbTv{}
 	if err := h.Load(fileName); err != nil {
-		h.hbbTvRegx.Regex = `HbbTV/([1-9]{1}(?:.[0-9]{1}){1,2})`
 		return nil
 	}
+	// Like Matomo, only the user agents with the HbbTV fragment are parsed.
+	// (v1.1.1 set the regex only when Load failed: the empty regex matched
+	// every user agent, so phones with e.g. "Samsung" became TVs.)
+	h.hbbTvRegx.Regex = `HbbTV/([1-9]{1}(?:\.[0-9]{1}){1,2})`
 	// Compile now: compiling on first use is not safe for concurrent use.
 	h.hbbTvRegx.Compile()
 	return h
@@ -34,16 +37,21 @@ type HbbTv struct {
 }
 
 func (h *HbbTv) Parse(ua string) *DeviceMatchResult {
-	u := parser.NewUserAgent(ua)
+	return h.ParseUserAgent(parser.NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (h *HbbTv) ParseUserAgent(u *parser.UserAgent) *DeviceMatchResult {
 	// only parse user agents containing hbbtv fragment
 	if !h.hbbTvRegx.IsMatchUA(u) {
 		return nil
 	}
 	r := h.DeviceParserAbstract.parse(u)
 	// always set device type to tv, even if no model/brand could be found
-	if r != nil {
-		r.Type = ParserNameHbbTv
+	if r == nil {
+		r = &DeviceMatchResult{}
 	}
+	r.Type = ParserNameHbbTv
 	return r
 }
 

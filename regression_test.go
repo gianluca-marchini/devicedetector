@@ -172,3 +172,71 @@ func TestNilCacheParams(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, d.cache)
 }
+
+// Every fixture gives exactly the expected os, client, device and bot.
+func TestFixtures(t *testing.T) {
+	parser.ResetParserAbstract()
+	_, fixtures := loadCorpus(t)
+	d, err := NewDeviceDetector("regexes", &CacheParams{IsEnabled: false})
+	require.NoError(t, err)
+	str := func(v any) string {
+		if v == nil {
+			return ""
+		}
+		return fmt.Sprint(v)
+	}
+	field := func(section any, key string) string { return str(fixtureField(section, key)) }
+	failures := 0
+	for _, f := range fixtures {
+		info := d.Parse(f.UserAgent)
+		var got, want []string
+		if f.Bot != nil {
+			bot := info.GetBot()
+			require.NotNil(t, bot, f.UserAgent)
+			got = []string{bot.Name, bot.Category, bot.Url, bot.Producer.Name, bot.Producer.Url}
+			want = []string{field(f.Bot, "name"), field(f.Bot, "category"), field(f.Bot, "url"),
+				str(fixtureField(f.Bot, "producer.name")), str(fixtureField(f.Bot, "producer.url"))}
+		} else {
+			os, c := info.GetOs(), info.GetClient()
+			got = []string{os.Name, os.ShortName, os.Version, os.Platform,
+				c.Type, c.Name, c.ShortName, c.Version, c.Engine, c.EngineVersion,
+				info.Type, info.Brand, info.Model}
+			want = []string{field(f.Os, "name"), field(f.Os, "short_name"), field(f.Os, "version"), field(f.Os, "platform"),
+				field(f.Client, "type"), field(f.Client, "name"), field(f.Client, "short_name"), field(f.Client, "version"),
+				field(f.Client, "engine"), field(f.Client, "engine_version"),
+				field(f.Device, "type"), field(f.Device, "brand"), field(f.Device, "model")}
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			failures++
+			if failures <= 20 {
+				t.Errorf("%s: %s\n\tgot  %q\n\twant %q", f.File, f.UserAgent, got, want)
+			}
+		}
+	}
+	if failures > 0 {
+		t.Errorf("%d/%d fixtures differ", failures, len(fixtures))
+	}
+}
+
+// Only the user agents with the HbbTV fragment are parsed as TVs, and they
+// are always TVs (v1.1.1 parsed every user agent with televisions.yml).
+func TestHbbTv(t *testing.T) {
+	parser.ResetParserAbstract()
+	d := newMiddlewareDetector(t)
+	phone := `Mozilla/5.0 (Linux; Android 13; SAMSUNG SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36`
+	require.Equal(t, parser.DEVICE_TYPE_SMARTPHONE, d.Parse(phone).GetDeviceType())
+	require.Equal(t, `SA`, d.Parse(phone).Brand)
+
+	tv := `Opera/9.80 (Linux sh4 ; U; HBBTV/1.0 (; LOH/1.00; -----;;;) CE-HTML/1.0 Config(L:de,CC:AT); en) Presto/2.5.21 Version/10.30`
+	require.Equal(t, parser.DEVICE_TYPE_TV, d.Parse(tv).GetDeviceType())
+	require.Equal(t, ``, d.Parse(tv).Brand)
+}
+
+// Android user agents without a known device: "Mobile" is a smartphone,
+// "Tablet" a tablet (v1.1.1 tested the Mobile fragment twice).
+func TestAndroidFragments(t *testing.T) {
+	parser.ResetParserAbstract()
+	d := newMiddlewareDetector(t)
+	require.Equal(t, parser.DEVICE_TYPE_SMARTPHONE, d.Parse(`Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0`).GetDeviceType())
+	require.Equal(t, parser.DEVICE_TYPE_TABLET, d.Parse(`Mozilla/5.0 (Android 14; Tablet; rv:131.0) Gecko/131.0 Firefox/131.0`).GetDeviceType())
+}

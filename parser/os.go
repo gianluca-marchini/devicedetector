@@ -179,6 +179,7 @@ func asciiLower(s string) string {
 // Parses the useragent for operating system information
 type Oss struct {
 	Regexes      []*OsReg
+	index        *Index
 	platforms    []*PlatformReg
 	overAllOnce  sync.Once
 	overAllMatch Regular
@@ -202,8 +203,13 @@ func NewOss(file string) (*Oss, error) {
 	for _, item := range v {
 		item.Compile()
 	}
+	regs := make([]*Regular, len(v))
+	for i, item := range v {
+		regs[i] = &item.Regular
+	}
 	return &Oss{
 		Regexes:   v,
+		index:     NewIndex(regs),
 		platforms: ps,
 	}, nil
 }
@@ -234,10 +240,22 @@ func (o *Oss) PreMatch(ua string) bool {
 }
 
 func (o *Oss) Parse(ua string) *OsMatchResult {
-	u := NewUserAgent(ua)
+	return o.ParseUserAgent(NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (o *Oss) ParseUserAgent(u *UserAgent) *OsMatchResult {
 	var matches []string
 	var osRegex *OsReg
-	for _, osRegex = range o.Regexes {
+	var candidates Candidates
+	if o.index != nil {
+		candidates = o.index.Candidates(u)
+	}
+	for i := range o.Regexes {
+		osRegex = o.Regexes[i]
+		if candidates != nil && !candidates.Has(i) {
+			continue
+		}
 		matches = osRegex.MatchUA(u)
 		if len(matches) > 0 {
 			break

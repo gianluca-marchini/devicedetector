@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	regexp "github.com/dlclark/regexp2"
 	gover "github.com/mcuadros/go-version"
 
 	"github.com/gianluca-marchini/devicedetector/parser"
@@ -27,10 +26,15 @@ var desktopOsArray = []string{
 }
 
 var (
-	chrMobReg = regexp.MustCompile(fixUserAgentRegEx(`Chrome/[\.0-9]* Mobile`), regexp.IgnoreCase)
-	chrTabReg = regexp.MustCompile(fixUserAgentRegEx(`Chrome/[\.0-9]* (?!Mobile)`), regexp.IgnoreCase)
-	opaTabReg = regexp.MustCompile(fixUserAgentRegEx(`Opera Tablet`), regexp.IgnoreCase)
-	opaTvReg  = regexp.MustCompile(fixUserAgentRegEx(`Opera TV Store`), regexp.IgnoreCase)
+	chrMobRegex = parser.NewRegex(fixUserAgentRegEx(`Chrome/[\.0-9]* Mobile`))
+	chrTabRegex = parser.NewRegex(fixUserAgentRegEx(`Chrome/[\.0-9]* (?!Mobile)`))
+	opaTabRegex = parser.NewRegex(fixUserAgentRegEx(`Opera Tablet`))
+	opaTvRegex  = parser.NewRegex(fixUserAgentRegEx(`Opera TV Store`))
+
+	chrMobReg = chrMobRegex.Regexp()
+	chrTabReg = chrTabRegex.Regexp()
+	opaTabReg = opaTabRegex.Regexp()
+	opaTvReg  = opaTvRegex.Regexp()
 )
 
 func fixUserAgentRegEx(regex string) string {
@@ -149,8 +153,20 @@ func (d *DeviceDetector) ParseBot(ua string) *parser.BotMatchResult {
 }
 
 func (d *DeviceDetector) ParseOs(ua string) *parser.OsMatchResult {
+	return d.parseOs(parser.NewUserAgent(ua))
+}
+
+func (d *DeviceDetector) parseOs(u *parser.UserAgent) *parser.OsMatchResult {
 	for _, p := range d.osParsers {
-		if r := p.Parse(ua); r != nil {
+		var r *parser.OsMatchResult
+		// Only the built-in parsers take the prepared user agent: a custom
+		// parser (even one embedding a built-in one) gets its own Parse called.
+		if o, ok := p.(*parser.Oss); ok {
+			r = o.ParseUserAgent(u)
+		} else {
+			r = p.Parse(u.String())
+		}
+		if r != nil {
 			return r
 		}
 	}
@@ -158,8 +174,29 @@ func (d *DeviceDetector) ParseOs(ua string) *parser.OsMatchResult {
 }
 
 func (d *DeviceDetector) ParseClient(ua string) *client.ClientMatchResult {
-	for _, parser := range d.clientParsers {
-		if r := parser.Parse(ua); r != nil {
+	return d.parseClient(parser.NewUserAgent(ua))
+}
+
+func (d *DeviceDetector) parseClient(u *parser.UserAgent) *client.ClientMatchResult {
+	for _, p := range d.clientParsers {
+		var r *client.ClientMatchResult
+		switch p := p.(type) {
+		case *client.FeedReader:
+			r = p.ParseUserAgent(u)
+		case *client.MobileApp:
+			r = p.ParseUserAgent(u)
+		case *client.MediaPlayer:
+			r = p.ParseUserAgent(u)
+		case *client.Pim:
+			r = p.ParseUserAgent(u)
+		case *client.Browser:
+			r = p.ParseUserAgent(u)
+		case *client.Library:
+			r = p.ParseUserAgent(u)
+		default:
+			r = p.Parse(u.String())
+		}
+		if r != nil {
 			return r
 		}
 	}
@@ -167,24 +204,44 @@ func (d *DeviceDetector) ParseClient(ua string) *client.ClientMatchResult {
 }
 
 func (d *DeviceDetector) ParseDevice(ua string) *device.DeviceMatchResult {
-	for _, parser := range d.deviceParsers {
-		if r := parser.Parse(ua); r != nil {
+	return d.parseDevice(parser.NewUserAgent(ua))
+}
+
+func (d *DeviceDetector) parseDevice(u *parser.UserAgent) *device.DeviceMatchResult {
+	for _, p := range d.deviceParsers {
+		var r *device.DeviceMatchResult
+		switch p := p.(type) {
+		case *device.HbbTv:
+			r = p.ParseUserAgent(u)
+		case *device.Console:
+			r = p.ParseUserAgent(u)
+		case *device.Car:
+			r = p.ParseUserAgent(u)
+		case *device.Camera:
+			r = p.ParseUserAgent(u)
+		case *device.PortableMediaPlayer:
+			r = p.ParseUserAgent(u)
+		case *device.Mobile:
+			r = p.ParseUserAgent(u)
+		default:
+			r = p.Parse(u.String())
+		}
+		if r != nil {
 			return r
 		}
 	}
 	return nil
 }
 
-func (d *DeviceDetector) parseInfo(info *DeviceInfo) {
-	ua := info.userAgent
-	if r := d.ParseDevice(ua); r != nil {
+func (d *DeviceDetector) parseInfo(info *DeviceInfo, u *parser.UserAgent) {
+	if r := d.parseDevice(u); r != nil {
 		info.Type = r.Type
 		info.Model = r.Model
 		info.Brand = r.Brand
 	}
 	// If no brand has been assigned try to match by known vendor fragments
 	if info.Brand == "" && d.vendorParser != nil {
-		info.Brand = d.vendorParser.Parse(ua)
+		info.Brand = d.vendorParser.ParseUserAgent(u)
 	}
 
 	os := info.GetOs()
@@ -203,20 +260,20 @@ func (d *DeviceDetector) parseInfo(info *DeviceInfo) {
 	// See https://developer.chrome.com/multidevice/user-agent#chrome_for_android_user_agent
 	if deviceType == parser.DEVICE_TYPE_INVALID && osFamily == `Android` {
 		if browserName, ok := client.GetBrowserFamily(cmr.ShortName); ok && browserName == `Chrome` {
-			if ok, _ := chrMobReg.MatchString(ua); ok {
+			if chrMobRegex.IsMatch(u) {
 				deviceType = parser.DEVICE_TYPE_SMARTPHONE
-			} else if ok, _ = chrTabReg.MatchString(ua); ok {
+			} else if chrTabRegex.IsMatch(u) {
 				deviceType = parser.DEVICE_TYPE_TABLET
 			}
 		}
 	}
 
 	if deviceType == parser.DEVICE_TYPE_INVALID {
-		if info.HasAndroidMobileFragment() {
+		if adrTabRegex.IsMatch(u) {
 			deviceType = parser.DEVICE_TYPE_TABLET
-		} else if ok, _ := opaTabReg.MatchString(ua); ok {
+		} else if opaTabRegex.IsMatch(u) {
 			deviceType = parser.DEVICE_TYPE_TABLET
-		} else if info.HasAndroidMobileFragment() {
+		} else if adrMobRegex.IsMatch(u) {
 			deviceType = parser.DEVICE_TYPE_SMARTPHONE
 		} else if osShortName == "AND" && osVersion != "" {
 			if gover.CompareSimple(osVersion, `2.0`) == -1 {
@@ -236,12 +293,12 @@ func (d *DeviceDetector) parseInfo(info *DeviceInfo) {
 	// According to http://msdn.microsoft.com/en-us/library/ie/hh920767(v=vs.85).aspx
 	if deviceType == parser.DEVICE_TYPE_INVALID &&
 		(osShortName == `WRT` || (osShortName == `WIN` && gover.CompareSimple(osVersion, `8`) >= 0)) &&
-		info.IsTouchEnabled() {
+		touchRegex.IsMatch(u) {
 		deviceType = parser.DEVICE_TYPE_TABLET
 	}
 
 	// All devices running Opera TV Store are assumed to be a tv
-	if ok, _ := opaTvReg.MatchString(ua); ok {
+	if opaTvRegex.IsMatch(u) {
 		deviceType = parser.DEVICE_TYPE_TV
 	}
 
@@ -300,14 +357,15 @@ func (d *DeviceDetector) Parse(ua string) *DeviceInfo {
 		return d.cacheDeviceInfo(ua, info)
 	}
 
-	info.os = d.ParseOs(ua)
+	u := parser.NewUserAgent(ua)
+	info.os = d.parseOs(u)
 
 	// Parse Clients
 	// Clients might be browsers, Feed Readers, Mobile Apps, Media Players or
 	// any other application accessing with an parseable UA
-	info.client = d.ParseClient(ua)
+	info.client = d.parseClient(u)
 
-	d.parseInfo(info)
+	d.parseInfo(info, u)
 
 	return d.cacheDeviceInfo(ua, info)
 }

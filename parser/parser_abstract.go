@@ -97,9 +97,8 @@ func UserAgentPattern(regex string) string {
 // goroutines.
 func (r *Regular) Compile() *regexp.Regexp {
 	if r.Regexp == nil {
-		str := UserAgentPattern(r.Regex)
-		r.Regexp = regexp.MustCompile(str, regexp.IgnoreCase)
-		r.x = newRegex(r.Regexp, str)
+		r.Regexp = regexp.MustCompile(UserAgentPattern(r.Regex), regexp.IgnoreCase)
+		r.x = newUserAgentRegex(r.Regexp, r.Regex)
 	}
 	return r.Regexp
 }
@@ -174,10 +173,26 @@ var (
 	tdReg = regexp.MustCompile(` TD$`, regexp.IgnoreCase)
 )
 
+// removeTD removes a final " TD" (case insensitive), like replacing tdReg
+// with "": in regexp2 `$` also matches before a final "\n".
+func removeTD(model string) string {
+	isTD := func(s string) bool {
+		return s[0] == ' ' && s[1]|0x20 == 't' && s[2]|0x20 == 'd'
+	}
+	n := len(model)
+	if n >= 3 && isTD(model[n-3:]) {
+		return model[:n-3]
+	}
+	if n >= 4 && model[n-1] == '\n' && isTD(model[n-4:n-1]) {
+		return model[:n-4] + "\n"
+	}
+	return model
+}
+
 func BuildModel(m string, matches []string) string {
 	model := BuildByMatch(m, matches)
 	model = strings.ReplaceAll(model, "_", " ")
-	model, _ = tdReg.Replace(model, "", 0, -1)
+	model = removeTD(model)
 	if model == "Build" {
 		return ""
 	}

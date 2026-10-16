@@ -61,7 +61,11 @@ func NewVendor(file string) (*VendorFragments, error) {
 }
 
 func (v *VendorFragments) Parse(ua string) string {
-	u := NewUserAgent(ua)
+	return v.ParseUserAgent(NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (v *VendorFragments) ParseUserAgent(u *UserAgent) string {
 	for _, vendor := range v.vendors {
 		for _, regex := range vendor.regexes {
 			if regex.IsMatchUA(u) {

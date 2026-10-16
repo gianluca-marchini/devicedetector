@@ -2,6 +2,8 @@ package client
 
 import (
 	"path/filepath"
+
+	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
 const ParserNameLibrary = `library`
@@ -26,4 +28,9 @@ func NewLibrary(fileName string) *Library {
 // Client parser for tool & software detection
 type Library struct {
 	ClientParserAbstract
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (l *Library) ParseUserAgent(ua *parser.UserAgent) *ClientMatchResult {
+	return l.parse(ua)
 }

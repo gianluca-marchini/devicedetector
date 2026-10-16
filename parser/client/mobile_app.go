@@ -2,6 +2,8 @@ package client
 
 import (
 	"path/filepath"
+
+	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
 const ParserNameMobileApp = `mobile app`
@@ -26,4 +28,9 @@ func NewMobileApp(fileName string) *MobileApp {
 // Client parser for mobile app detection
 type MobileApp struct {
 	ClientParserAbstract
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (m *MobileApp) ParseUserAgent(ua *parser.UserAgent) *ClientMatchResult {
+	return m.parse(ua)
 }

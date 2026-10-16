@@ -30,8 +30,12 @@ type PortableMediaPlayer struct {
 }
 
 func (p *PortableMediaPlayer) Parse(ua string) *DeviceMatchResult {
-	u := parser.NewUserAgent(ua)
-	if !p.preMatch(u) {
+	return p.ParseUserAgent(parser.NewUserAgent(ua))
+}
+
+// ParseUserAgent is Parse for a prepared user agent.
+func (p *PortableMediaPlayer) ParseUserAgent(u *parser.UserAgent) *DeviceMatchResult {
+	if !p.gate(u) {
 		return nil
 	}
 	return p.parse(u)
