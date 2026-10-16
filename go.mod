@@ -1,6 +1,6 @@
 module github.com/gianluca-marchini/devicedetector
 
-go 1.22
+go 1.27.0
 
 require (
 	github.com/dlclark/regexp2 v1.2.0
