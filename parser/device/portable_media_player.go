@@ -2,6 +2,8 @@ package device
 
 import (
 	"path/filepath"
+
+	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
 const ParserNamePortableMediaPlayer = `portablemediaplayer`
@@ -28,8 +30,9 @@ type PortableMediaPlayer struct {
 }
 
 func (p *PortableMediaPlayer) Parse(ua string) *DeviceMatchResult {
-	if !p.PreMatch(ua) {
+	u := parser.NewUserAgent(ua)
+	if !p.preMatch(u) {
 		return nil
 	}
-	return p.DeviceParserAbstract.Parse(ua)
+	return p.parse(u)
 }

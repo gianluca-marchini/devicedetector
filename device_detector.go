@@ -57,7 +57,7 @@ type CacheParams struct {
 
 // Initialize the device detector.
 // - dir: path of the folder containing the regexes to parse the userAgent
-// - enableCache: if true, the cache will be enabled.
+// - cacheParams: if IsEnabled is true, the cache will be enabled. A nil value disables the cache.
 func NewDeviceDetector(dir string, cacheParams *CacheParams) (*DeviceDetector, error) {
 	vp, err := parser.NewVendor(filepath.Join(dir, parser.FixtureFileVendor))
 	if err != nil {
@@ -75,7 +75,7 @@ func NewDeviceDetector(dir string, cacheParams *CacheParams) (*DeviceDetector, e
 		osParsers:    []parser.OsParser{osp},
 	}
 
-	if cacheParams.IsEnabled {
+	if cacheParams != nil && cacheParams.IsEnabled {
 		if cacheParams.Size == 0 {
 			cacheParams.Size = CACHE_DEFAULT_SIZE
 		}

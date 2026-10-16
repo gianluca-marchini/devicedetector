@@ -23,26 +23,30 @@ func NewCache(size int) *Cache {
 	}
 }
 
-// Associate a deviceInfo element with the userAgent
+// Associate a deviceInfo element with the userAgent.
+// When the userAgent is already cached (e.g. it was parsed by two goroutines
+// at the same time) its value is replaced and it keeps its position.
 func (d *Cache) Add(ua string, deviceInfo *DeviceInfo) {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if _, ok := d.cache[ua]; ok {
+		d.cache[ua] = deviceInfo
+		return
+	}
 
 	// Add ua to the cache
 	d.cache[ua] = deviceInfo
 
-	// Add ua to the key_list and keep control of the size of the cache
+	// Add ua to the key_list and keep control of the size of the cache:
+	// key_list holds each cached ua exactly once, oldest first.
 	d.key_list.PushBack(ua)
 	if d.key_list.Len() > d.size {
-		// Remove exceeding ua from the list
-		most_recent_ua := d.key_list.Front()
-
-		d.key_list.Remove(most_recent_ua)
-
-		// Remove exceeding ua from the cache
-		delete(d.cache, (most_recent_ua.Value).(string))
+		// Remove the oldest ua from the list and from the cache
+		oldest := d.key_list.Front()
+		d.key_list.Remove(oldest)
+		delete(d.cache, oldest.Value.(string))
 	}
-
-	d.mu.Unlock()
 }
 
 // Look for a cached userAgent: if found, hit is true.

@@ -49,8 +49,12 @@ type BrowserEngine struct {
 }
 
 func (d *BrowserEngine) Parse(ua string) *ClientMatchResult {
+	return d.parse(parser.NewUserAgent(ua))
+}
+
+func (d *BrowserEngine) parse(ua *parser.UserAgent) *ClientMatchResult {
 	for _, regex := range d.Regexes {
-		matches := regex.MatchUserAgent(ua)
+		matches := regex.MatchUA(ua)
 		if len(matches) > 0 {
 			name := parser.BuildByMatch(regex.Name, matches)
 			for _, v := range availableEngines {

@@ -3,6 +3,7 @@ package client
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gianluca-marchini/devicedetector/parser"
 )
@@ -32,6 +33,7 @@ type ClientReg struct {
 type ClientParserAbstract struct {
 	Regexes      []*ClientReg
 	ParserName   string
+	overAllOnce  sync.Once
 	overAllMatch parser.Regular
 }
 
@@ -45,33 +47,46 @@ func (c *ClientParserAbstract) Load(file string) error {
 		item.Compile()
 	}
 	c.Regexes = v
+	c.overAllMatch = parser.Regular{}
+	c.buildOverAllMatch()
+	c.overAllOnce.Do(func() {})
 	return nil
 }
 
-func (c *ClientParserAbstract) PreMatch(ua string) bool {
-	if c.overAllMatch.Regexp == nil {
-		count := len(c.Regexes)
-		if count == 0 {
-			return false
-		}
-		sb := strings.Builder{}
-		sb.WriteString(c.Regexes[count-1].Regex)
-		for i := count - 2; i >= 0; i-- {
-			sb.WriteString("|")
-			sb.WriteString(c.Regexes[i].Regex)
-		}
-		c.overAllMatch.Regex = sb.String()
-		c.overAllMatch.Compile()
+// buildOverAllMatch builds the regex matching when any regex matches.
+func (c *ClientParserAbstract) buildOverAllMatch() {
+	count := len(c.Regexes)
+	if count == 0 {
+		return
 	}
-	r := c.overAllMatch.IsMatchUserAgent(ua)
-	return r
+	sb := strings.Builder{}
+	sb.WriteString(c.Regexes[count-1].Regex)
+	for i := count - 2; i >= 0; i-- {
+		sb.WriteString("|")
+		sb.WriteString(c.Regexes[i].Regex)
+	}
+	c.overAllMatch.Regex = sb.String()
+	c.overAllMatch.Compile()
+}
+
+func (c *ClientParserAbstract) PreMatch(ua string) bool {
+	return c.preMatch(parser.NewUserAgent(ua))
+}
+
+func (c *ClientParserAbstract) preMatch(ua *parser.UserAgent) bool {
+	c.overAllOnce.Do(c.buildOverAllMatch)
+	if c.overAllMatch.Regexp == nil {
+		return false
+	}
+	return c.overAllMatch.IsMatchUA(ua)
 }
 
 // Parses the current UA and checks whether it contains any client information
 func (c *ClientParserAbstract) Parse(ua string) *ClientMatchResult {
-	if c.PreMatch(ua) {
+	u := parser.NewUserAgent(ua)
+	if c.preMatch(u) {
 		for _, regex := range c.Regexes {
-			matches := regex.MatchUserAgent(ua)
+			matches := regex.MatchUA(u)
 			if len(matches) > 0 {
 				return &ClientMatchResult{
 					Type:    c.ParserName,

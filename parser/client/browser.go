@@ -1,7 +1,11 @@
 package client
 
 import (
+	"fmt"
 	"path/filepath"
+	"sort"
+
+	"gopkg.in/yaml.v2"
 
 	gover "github.com/mcuadros/go-version"
 
@@ -322,9 +326,101 @@ func IsMobileOnlyBrowser(browser string) bool {
 
 type BrowserMatchResult = ClientMatchResult
 
+// browsersByName maps the lower-cased (ASCII) names of availableBrowsers to
+// their short codes.
+var browsersByName = func() map[string]string {
+	m := make(map[string]string, len(availableBrowsers))
+	for short, name := range availableBrowsers {
+		m[asciiLower(name)] = short
+	}
+	return m
+}()
+
+func asciiLower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if 'A' <= s[i] && s[i] <= 'Z' {
+			b := []byte(s)
+			for j := i; j < len(b); j++ {
+				if 'A' <= b[j] && b[j] <= 'Z' {
+					b[j] += 'a' - 'A'
+				}
+			}
+			return string(b)
+		}
+	}
+	return s
+}
+
 type Engine struct {
 	Default  string            `yaml:"default" json:"default"`
 	Versions map[string]string `yaml:"versions" json:"versions"`
+	// versions are the Versions in the order of the YAML file.
+	versions []engineVersion
+}
+
+type engineVersion struct {
+	version string
+	engine  string
+}
+
+func (e *Engine) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Default  string            `yaml:"default"`
+		Versions map[string]string `yaml:"versions"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	var order struct {
+		Versions yaml.MapSlice `yaml:"versions"`
+	}
+	if err := unmarshal(&order); err != nil {
+		return err
+	}
+	e.Default = raw.Default
+	e.Versions = raw.Versions
+	e.versions = make([]engineVersion, 0, len(raw.Versions))
+	used := make(map[string]bool, len(raw.Versions))
+	for _, item := range order.Versions {
+		k, ok := item.Key.(string)
+		if !ok {
+			k = fmt.Sprint(item.Key)
+		}
+		if engine, ok := raw.Versions[k]; ok && !used[k] {
+			used[k] = true
+			e.versions = append(e.versions, engineVersion{version: k, engine: engine})
+		}
+	}
+	if len(e.versions) < len(raw.Versions) {
+		e.versions = sortedEngineVersions(raw.Versions, used)
+	}
+	return nil
+}
+
+// sortedEngineVersions returns the versions not in skip by ascending version.
+func sortedEngineVersions(versions map[string]string, skip map[string]bool) []engineVersion {
+	r := make([]engineVersion, 0, len(versions))
+	for k, v := range versions {
+		if !skip[k] {
+			r = append(r, engineVersion{version: k, engine: v})
+		}
+	}
+	sort.Slice(r, func(i, j int) bool {
+		if c := gover.CompareSimple(r[i].version, r[j].version); c != 0 {
+			return c < 0
+		}
+		return r[i].version < r[j].version
+	})
+	return r
+}
+
+// orderedVersions returns the versions in the order of the YAML file. When
+// the Engine was not decoded from YAML they are sorted by ascending version.
+func (e *Engine) orderedVersions() []engineVersion {
+	if e.versions != nil || len(e.Versions) == 0 {
+		return e.versions
+	}
+	return sortedEngineVersions(e.Versions, nil)
 }
 
 type BrowserItem struct {
@@ -336,8 +432,9 @@ type BrowserItem struct {
 
 // Client parser for browser detection
 type Browser struct {
-	Regexes  []*BrowserItem
-	engine   BrowserEngine
+	Regexes []*BrowserItem
+	engine  BrowserEngine
+	// verCache holds the engine version regexes. It is only written by Load.
 	verCache map[string]*Version
 }
 
@@ -361,7 +458,6 @@ func NewBrowser(fileName string) *Browser {
 }
 
 func (b *Browser) Load(file string) error {
-	b.verCache = make(map[string]*Version)
 	var v []*BrowserItem
 	err := parser.ReadYamlFile(file, &v)
 	if err != nil {
@@ -372,6 +468,29 @@ func (b *Browser) Load(file string) error {
 	if err != nil {
 		return err
 	}
+
+	// Compile everything now: the parser must be safe for concurrent use.
+	verCache := make(map[string]*Version)
+	addEngine := func(engine string) {
+		if _, ok := verCache[engine]; !ok && engine != "" {
+			ver := &Version{Engine: engine}
+			ver.Compile()
+			verCache[engine] = ver
+		}
+	}
+	for _, engine := range availableEngines {
+		addEngine(engine)
+	}
+	for _, item := range v {
+		item.Compile()
+		if item.Engine != nil {
+			addEngine(item.Engine.Default)
+			for _, engine := range item.Engine.Versions {
+				addEngine(engine)
+			}
+		}
+	}
+	b.verCache = verCache
 	b.Regexes = v
 	return nil
 }
@@ -381,23 +500,22 @@ func (b *Browser) PreMatch(ua string) bool {
 }
 
 func (b *Browser) Parse(ua string) *BrowserMatchResult {
+	u := parser.NewUserAgent(ua)
 	for _, regex := range b.Regexes {
-		matches := regex.MatchUserAgent(ua)
+		matches := regex.MatchUA(u)
 		if len(matches) > 0 {
 			name := parser.BuildByMatch(regex.Name, matches)
-			for browserShort, browserName := range availableBrowsers {
-				if parser.StringEqualIgnoreCase(name, browserName) {
-					version := parser.BuildVersion(regex.Version, matches)
-					engine := b.BuildEngine(regex.Engine, version, ua)
-					engineVersion := b.BuildEngineVersion(engine, ua)
-					return &BrowserMatchResult{
-						Type:          ParserNameBrowser,
-						Name:          browserName,
-						ShortName:     browserShort,
-						Version:       version,
-						Engine:        engine,
-						EngineVersion: engineVersion,
-					}
+			if browserShort, ok := browsersByName[asciiLower(name)]; ok {
+				version := parser.BuildVersion(regex.Version, matches)
+				engine := b.buildEngine(regex.Engine, version, u)
+				engineVersion := b.BuildEngineVersion(engine, ua)
+				return &BrowserMatchResult{
+					Type:          ParserNameBrowser,
+					Name:          availableBrowsers[browserShort],
+					ShortName:     browserShort,
+					Version:       version,
+					Engine:        engine,
+					EngineVersion: engineVersion,
 				}
 			}
 		}
@@ -406,17 +524,22 @@ func (b *Browser) Parse(ua string) *BrowserMatchResult {
 }
 
 func (b *Browser) BuildEngine(engineData *Engine, browserVersion, ua string) string {
+	return b.buildEngine(engineData, browserVersion, parser.NewUserAgent(ua))
+}
+
+func (b *Browser) buildEngine(engineData *Engine, browserVersion string, ua *parser.UserAgent) string {
 	engine := ""
 	if engineData != nil {
 		engine = engineData.Default
-		for version, versionEngine := range engineData.Versions {
-			if gover.CompareSimple(browserVersion, version) >= 0 {
-				engine = versionEngine
+		// The last version lower than or equal to the browser version wins.
+		for _, v := range engineData.orderedVersions() {
+			if gover.CompareSimple(browserVersion, v.version) >= 0 {
+				engine = v.engine
 			}
 		}
 	}
 	if engine == "" {
-		if engineResult := b.engine.Parse(ua); engineResult != nil {
+		if engineResult := b.engine.parse(ua); engineResult != nil {
 			engine = engineResult.Name
 		}
 	}
@@ -429,9 +552,9 @@ func (b *Browser) BuildEngineVersion(engine, ua string) string {
 	}
 	v, ok := b.verCache[engine]
 	if !ok {
+		// Not known at load time: compile it without caching.
 		v = &Version{Engine: engine}
 		v.Compile()
-		b.verCache[engine] = v
 	}
 	return v.Parse(ua)
 }

@@ -2,6 +2,8 @@ package device
 
 import (
 	"path/filepath"
+
+	"github.com/gianluca-marchini/devicedetector/parser"
 )
 
 const ParserNameCar = `car browser`
@@ -28,8 +30,9 @@ type Car struct {
 }
 
 func (c *Car) Parse(ua string) *DeviceMatchResult {
-	if !c.PreMatch(ua) {
+	u := parser.NewUserAgent(ua)
+	if !c.preMatch(u) {
 		return nil
 	}
-	return c.DeviceParserAbstract.Parse(ua)
+	return c.parse(u)
 }
